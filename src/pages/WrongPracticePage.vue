@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 type QuestionKind = 'single' | 'multiple' | 'fill' | 'short'
@@ -85,6 +85,21 @@ const practiceQuestions = ref<WrongQuestion[]>([])
 const submitted = ref(false)
 const userAnswers = ref<Record<number, UserAnswer>>({})
 const isPracticeStarted = ref(false)
+const hasGeneratedPractice = ref(false)
+const addedWrongQuestionIds = ref<Record<number, boolean>>({})
+const WRONG_PRACTICE_STATE_KEY = 'geoedu_wrong_practice_state_v1'
+
+interface WrongPracticeState {
+  practiceMode: PracticeMode
+  selectedChapters: string[]
+  randomCount: number
+  practiceQuestions: WrongQuestion[]
+  submitted: boolean
+  userAnswers: Record<number, UserAnswer>
+  isPracticeStarted: boolean
+  hasGeneratedPractice: boolean
+  addedWrongQuestionIds: Record<number, boolean>
+}
 
 const chapterOptions = computed(() => {
   const set = new Set(allWrongQuestions.value.map((q) => q.chapter))
@@ -125,6 +140,8 @@ function createPracticeSet() {
   submitted.value = false
   userAnswers.value = {}
   isPracticeStarted.value = false
+  hasGeneratedPractice.value = true
+  addedWrongQuestionIds.value = {}
 }
 
 function startPractice() {
@@ -193,6 +210,65 @@ function displayUserAnswer(q: WrongQuestion): string {
   if (q.kind === 'multiple') return ans.multiple?.length ? ans.multiple.join('、') : '未作答'
   return ans.text?.trim() || '未作答'
 }
+
+function askQuestionInQa(q: WrongQuestion) {
+  router.push({
+    path: '/qa',
+    query: { prefill: q.question },
+  })
+}
+
+function restorePageState() {
+  try {
+    const raw = sessionStorage.getItem(WRONG_PRACTICE_STATE_KEY)
+    if (!raw) return
+    const state = JSON.parse(raw) as WrongPracticeState
+    practiceMode.value = state.practiceMode ?? 'chapter'
+    selectedChapters.value = Array.isArray(state.selectedChapters) ? state.selectedChapters : []
+    randomCount.value = typeof state.randomCount === 'number' ? state.randomCount : 5
+    practiceQuestions.value = Array.isArray(state.practiceQuestions) ? state.practiceQuestions : []
+    submitted.value = !!state.submitted
+    userAnswers.value = state.userAnswers ?? {}
+    isPracticeStarted.value = !!state.isPracticeStarted
+    hasGeneratedPractice.value = !!state.hasGeneratedPractice
+    addedWrongQuestionIds.value = state.addedWrongQuestionIds ?? {}
+  } catch {
+    // ignore invalid cached state
+  }
+}
+
+watch(
+  [
+    practiceMode,
+    selectedChapters,
+    randomCount,
+    practiceQuestions,
+    submitted,
+    userAnswers,
+    isPracticeStarted,
+    hasGeneratedPractice,
+    addedWrongQuestionIds,
+  ],
+  () => {
+    const state: WrongPracticeState = {
+      practiceMode: practiceMode.value,
+      selectedChapters: selectedChapters.value,
+      randomCount: randomCount.value,
+      practiceQuestions: practiceQuestions.value,
+      submitted: submitted.value,
+      userAnswers: userAnswers.value,
+      isPracticeStarted: isPracticeStarted.value,
+      hasGeneratedPractice: hasGeneratedPractice.value,
+      addedWrongQuestionIds: addedWrongQuestionIds.value,
+    }
+    sessionStorage.setItem(WRONG_PRACTICE_STATE_KEY, JSON.stringify(state))
+  },
+  { deep: true },
+)
+
+onMounted(() => {
+  restorePageState()
+})
 
 function exportPractice() {
   if (practiceQuestions.value.length === 0) {
@@ -270,6 +346,7 @@ function backToWrongBook() {
       <div class="action-row">
         <button type="button" class="btn btn--primary" @click="createPracticeSet">生成练习</button>
         <button
+          v-if="hasGeneratedPractice"
           type="button"
           class="btn btn--primary"
           :disabled="practiceQuestions.length === 0"
@@ -281,7 +358,7 @@ function backToWrongBook() {
       </div>
     </section>
 
-    <section v-if="isPracticeStarted && practiceQuestions.length" class="practice-list">
+    <section v-if="hasGeneratedPractice && practiceQuestions.length" class="practice-list">
       <article v-for="(q, index) in practiceQuestions" :key="q.id" class="practice-card">
         <p class="practice-card__meta">第 {{ index + 1 }} 题 · {{ kindLabel[q.kind] }} · {{ q.chapter }}</p>
         <p class="practice-card__question">{{ q.question }}</p>
@@ -292,7 +369,7 @@ function backToWrongBook() {
               type="radio"
               :name="`single-${q.id}`"
               :value="opt"
-              :disabled="submitted"
+              :disabled="submitted || !isPracticeStarted"
               @change="updateSingle(q.id, opt)"
             />
             <span>{{ opt }}</span>
@@ -304,7 +381,7 @@ function backToWrongBook() {
             <input
               type="checkbox"
               :value="opt"
-              :disabled="submitted"
+              :disabled="submitted || !isPracticeStarted"
               @change="toggleMultiple(q.id, opt, ($event.target as HTMLInputElement).checked)"
             />
             <span>{{ opt }}</span>
@@ -316,7 +393,7 @@ function backToWrongBook() {
           class="practice-input"
           type="text"
           placeholder="请输入答案"
-          :disabled="submitted"
+          :disabled="submitted || !isPracticeStarted"
           @input="updateText(q.id, ($event.target as HTMLInputElement).value)"
         />
 
@@ -325,7 +402,7 @@ function backToWrongBook() {
           class="practice-textarea"
           rows="4"
           placeholder="请输入你的作答"
-          :disabled="submitted"
+          :disabled="submitted || !isPracticeStarted"
           @input="updateText(q.id, ($event.target as HTMLTextAreaElement).value)"
         />
 
@@ -333,6 +410,7 @@ function backToWrongBook() {
           <p>你的答案：{{ displayUserAnswer(q) }}</p>
           <p>参考答案：{{ displayAnswer(q) }}</p>
           <p>{{ isCorrect(q) ? '回答正确' : '回答错误' }}</p>
+          <button type="button" class="btn btn--primary" @click="askQuestionInQa(q)">去提问</button>
         </div>
       </article>
     </section>

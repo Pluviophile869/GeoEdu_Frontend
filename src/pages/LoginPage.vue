@@ -5,6 +5,7 @@ import { loginApi, registerApi } from '../api/auth'
 import { normalizeUserRole } from '../utils/auth'
 
 const router = useRouter()
+const CURRENT_CHAT_KEY = 'geoedu.currentChat.v1'
 
 // 表单模式：login | register
 const mode = ref<'login' | 'register'>('login')
@@ -131,8 +132,9 @@ async function handleLogin() {
         }),
       )
     }
-    // 登录成功，跳转至问答页面
-    await router.push('/qa')
+    // 登录成功后进入新对话页，避免恢复上次会话
+    localStorage.removeItem(CURRENT_CHAT_KEY)
+    await router.push('/qa?chat=new')
   } catch (err: any) {
     errorMessage.value = err.message || '登录失败，请检查用户名或密码'
   } finally {
@@ -178,7 +180,8 @@ async function handleRegister() {
         }),
       )
     }
-    await router.push('/qa')
+    localStorage.removeItem(CURRENT_CHAT_KEY)
+    await router.push('/qa?chat=new')
   } catch (err: any) {
     errorMessage.value = err.message || '注册失败，请稍后重试'
   } finally {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { addQuestionToWrongBook } from '../utils/wrongBook'
 
 type Question = {
   id: string
@@ -21,6 +22,21 @@ const submitted = ref(false)
 const practiceQuestions = ref<Question[]>([])
 const userAnswers = ref<Record<string, string | string[]>>({})
 const isPracticeStarted = ref(false)
+const hasGeneratedPractice = ref(false)
+const addedWrongQuestionIds = ref<Record<string, boolean>>({})
+const QUESTION_PRACTICE_STATE_KEY = 'geoedu_question_practice_state_v1'
+
+interface QuestionPracticeState {
+  practiceMode: PracticeMode
+  selectedChapters: string[]
+  questionCount: number
+  submitted: boolean
+  practiceQuestions: Question[]
+  userAnswers: Record<string, string | string[]>
+  isPracticeStarted: boolean
+  hasGeneratedPractice: boolean
+  addedWrongQuestionIds: Record<string, boolean>
+}
 
 const allQuestions = ref<Question[]>([
   {
@@ -85,6 +101,8 @@ function generatePractice() {
   submitted.value = false
   userAnswers.value = {}
   isPracticeStarted.value = false
+  hasGeneratedPractice.value = true
+  addedWrongQuestionIds.value = {}
 }
 
 function startPractice() {
@@ -137,6 +155,90 @@ function showUserAnswer(id: string) {
   if (!ans) return '未作答'
   return Array.isArray(ans) ? ans.join('、') : ans
 }
+
+function toMultipleCorrectAnswers(q: Question): string[] {
+  if (!q.options?.length) return []
+  const answerSet = new Set(q.answer.split(''))
+  return q.options.filter((opt) => answerSet.has(opt[0]))
+}
+
+function resolveKind(type: Question['type']) {
+  if (type === '单选' || type === '判断') return 'single'
+  if (type === '多选') return 'multiple'
+  return 'short'
+}
+
+function askAddToWrongBook(q: Question) {
+  if (addedWrongQuestionIds.value[q.id]) return
+  addQuestionToWrongBook({
+    kind: resolveKind(q.type),
+    question: q.text,
+    options: q.options,
+    correctAnswer: q.type === '多选' ? undefined : q.answer,
+    correctAnswers: q.type === '多选' ? toMultipleCorrectAnswers(q) : undefined,
+    chapter: q.chapter,
+  })
+  addedWrongQuestionIds.value = { ...addedWrongQuestionIds.value, [q.id]: true }
+}
+
+function askQuestionInQa(q: Question) {
+  router.push({
+    path: '/qa',
+    query: { prefill: q.text },
+  })
+}
+
+function restorePageState() {
+  try {
+    const raw = sessionStorage.getItem(QUESTION_PRACTICE_STATE_KEY)
+    if (!raw) return
+    const state = JSON.parse(raw) as QuestionPracticeState
+    practiceMode.value = state.practiceMode ?? 'chapter'
+    selectedChapters.value = Array.isArray(state.selectedChapters) ? state.selectedChapters : []
+    questionCount.value = typeof state.questionCount === 'number' ? state.questionCount : 4
+    submitted.value = !!state.submitted
+    practiceQuestions.value = Array.isArray(state.practiceQuestions) ? state.practiceQuestions : []
+    userAnswers.value = state.userAnswers ?? {}
+    isPracticeStarted.value = !!state.isPracticeStarted
+    hasGeneratedPractice.value = !!state.hasGeneratedPractice
+    addedWrongQuestionIds.value = state.addedWrongQuestionIds ?? {}
+  } catch {
+    // ignore invalid cached state
+  }
+}
+
+watch(
+  [
+    practiceMode,
+    selectedChapters,
+    questionCount,
+    submitted,
+    practiceQuestions,
+    userAnswers,
+    isPracticeStarted,
+    hasGeneratedPractice,
+    addedWrongQuestionIds,
+  ],
+  () => {
+    const state: QuestionPracticeState = {
+      practiceMode: practiceMode.value,
+      selectedChapters: selectedChapters.value,
+      questionCount: questionCount.value,
+      submitted: submitted.value,
+      practiceQuestions: practiceQuestions.value,
+      userAnswers: userAnswers.value,
+      isPracticeStarted: isPracticeStarted.value,
+      hasGeneratedPractice: hasGeneratedPractice.value,
+      addedWrongQuestionIds: addedWrongQuestionIds.value,
+    }
+    sessionStorage.setItem(QUESTION_PRACTICE_STATE_KEY, JSON.stringify(state))
+  },
+  { deep: true },
+)
+
+onMounted(() => {
+  restorePageState()
+})
 
 function exportResult() {
   if (!practiceQuestions.value.length) {
@@ -198,6 +300,7 @@ function backToBank() {
       <div class="action-row">
         <button type="button" class="btn btn--primary" @click="generatePractice">生成练习</button>
         <button
+          v-if="hasGeneratedPractice"
           type="button"
           class="btn btn--primary"
           :disabled="!practiceQuestions.length"
@@ -209,14 +312,19 @@ function backToBank() {
       </div>
     </section>
 
-    <section v-if="isPracticeStarted && practiceQuestions.length" class="practice-list">
+    <section v-if="hasGeneratedPractice && practiceQuestions.length" class="practice-list">
       <article v-for="(q, idx) in practiceQuestions" :key="q.id" class="practice-card">
         <p class="practice-card__meta">第 {{ idx + 1 }} 题 · {{ q.type }} · {{ q.chapter }}</p>
         <p class="practice-card__question">{{ q.text }}</p>
 
         <div v-if="(q.type === '单选' || q.type === '判断') && q.options?.length" class="practice-options">
           <label v-for="opt in q.options" :key="opt" class="option-item">
-            <input type="radio" :name="`single-${q.id}`" :disabled="submitted" @change="selectSingle(q.id, opt[0])" />
+            <input
+              type="radio"
+              :name="`single-${q.id}`"
+              :disabled="submitted || !isPracticeStarted"
+              @change="selectSingle(q.id, opt[0])"
+            />
             <span>{{ opt }}</span>
           </label>
         </div>
@@ -225,7 +333,7 @@ function backToBank() {
           <label v-for="opt in q.options" :key="opt" class="option-item">
             <input
               type="checkbox"
-              :disabled="submitted"
+              :disabled="submitted || !isPracticeStarted"
               @change="toggleMultiple(q.id, opt, ($event.target as HTMLInputElement).checked)"
             />
             <span>{{ opt }}</span>
@@ -236,7 +344,7 @@ function backToBank() {
           v-else
           class="practice-textarea"
           rows="4"
-          :disabled="submitted"
+          :disabled="submitted || !isPracticeStarted"
           placeholder="请输入作答内容"
           @input="setText(q.id, ($event.target as HTMLTextAreaElement).value)"
         />
@@ -244,6 +352,16 @@ function backToBank() {
         <div v-if="submitted" class="check-result" :class="{ 'is-correct': isCorrect(q) }">
           <p>你的答案：{{ showUserAnswer(q.id) }}</p>
           <p>参考答案：{{ q.answer }}</p>
+          <button type="button" class="btn btn--primary" @click="askQuestionInQa(q)">去提问</button>
+          <button
+            v-if="!isCorrect(q)"
+            type="button"
+            class="btn btn--ghost"
+            :disabled="!!addedWrongQuestionIds[q.id]"
+            @click="askAddToWrongBook(q)"
+          >
+            {{ addedWrongQuestionIds[q.id] ? '已收藏到错题本' : '收藏到错题本' }}
+          </button>
         </div>
       </article>
     </section>
