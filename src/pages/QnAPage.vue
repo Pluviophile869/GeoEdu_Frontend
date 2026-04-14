@@ -464,6 +464,17 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => route.query.prefill,
+  async (v) => {
+    if (typeof v !== 'string') return
+    question.value = v
+    await nextTick()
+    await router.replace('/qa')
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

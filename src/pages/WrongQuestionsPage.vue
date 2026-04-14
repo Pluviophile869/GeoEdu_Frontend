@@ -1,104 +1,29 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  DEFAULT_WRONG_BOOK_QUESTIONS,
+  loadWrongBookQuestions,
+  saveWrongBookQuestions,
+  type WrongBookQuestion,
+} from '../utils/wrongBook'
 
-type Difficulty = 'easy' | 'medium' | 'hard'
 type ClassifyMode = 'errorRate' | 'knowledge' | 'chapter'
-/** 单选、多选、填空、简答 */
-type QuestionKind = 'single' | 'multiple' | 'fill' | 'short'
-
-interface WrongQuestion {
-  id: number
-  kind: QuestionKind
-  question: string
-  /** 单选 / 多选 的选项 */
-  options?: string[]
-  /** 单选、填空、简答：参考答案文案 */
-  correctAnswer?: string
-  /** 多选：参考答案（选项文案列表） */
-  correctAnswers?: string[]
-  /** 0–100，答错占比（用于按错误率筛选） */
-  errorRate: number
-  wrongCount: number
-  difficulty: Difficulty
-  chapter: string
-  knowledgePoints: string[]
-  mastered: boolean
-}
+type Difficulty = WrongBookQuestion['difficulty']
+type QuestionKind = WrongBookQuestion['kind']
+type WrongQuestion = WrongBookQuestion
 
 const router = useRouter()
 
-const wrongQuestions = ref<WrongQuestion[]>([
-  {
-    id: 1,
-    kind: 'single',
-    question: '世界上最高的山峰是哪座？',
-    options: ['珠穆朗玛峰', '乔戈里峰', '乞力马扎罗山', '阿空加瓜峰'],
-    correctAnswer: '珠穆朗玛峰',
-    errorRate: 72,
-    wrongCount: 5,
-    difficulty: 'easy',
-    chapter: '第一章 地球与地图',
-    knowledgePoints: ['自然地理', '地形'],
-    mastered: false,
+const wrongQuestions = ref<WrongQuestion[]>(loadWrongBookQuestions(DEFAULT_WRONG_BOOK_QUESTIONS))
+
+watch(
+  wrongQuestions,
+  (val) => {
+    saveWrongBookQuestions(val)
   },
-  {
-    id: 2,
-    kind: 'fill',
-    question: '长江发源于______山脉。',
-    correctAnswer: '唐古拉',
-    errorRate: 45,
-    wrongCount: 3,
-    difficulty: 'medium',
-    chapter: '第二章 中国地理',
-    knowledgePoints: ['水文', '中国河流'],
-    mastered: false,
-  },
-  {
-    id: 3,
-    kind: 'multiple',
-    question: '下列哪些属于欧洲联盟成员国？（多选）',
-    options: ['法国', '瑞士', '德国', '挪威'],
-    correctAnswers: ['法国', '德国'],
-    errorRate: 38,
-    wrongCount: 2,
-    difficulty: 'medium',
-    chapter: '第三章 世界地理',
-    knowledgePoints: ['世界政区', '大洲'],
-    mastered: false,
-  },
-  {
-    id: 4,
-    kind: 'short',
-    question: '季风环流形成的主要原因是什么？',
-    correctAnswer:
-      '海陆热力性质差异导致冬夏季海陆气压中心交替，从而形成随季节变换风向的季风环流。',
-    errorRate: 88,
-    wrongCount: 7,
-    difficulty: 'hard',
-    chapter: '第一章 地球与地图',
-    knowledgePoints: ['大气环流', '气候'],
-    mastered: false,
-  },
-  {
-    id: 5,
-    kind: 'single',
-    question: '我国人口地理分界线「胡焕庸线」大致经过哪里？',
-    options: [
-      '黑河—腾冲一线',
-      '秦岭—淮河一线',
-      '大兴安岭—太行山一线',
-      '长江一线',
-    ],
-    correctAnswer: '黑河—腾冲一线',
-    errorRate: 22,
-    wrongCount: 1,
-    difficulty: 'easy',
-    chapter: '第二章 中国地理',
-    knowledgePoints: ['人文地理', '人口'],
-    mastered: false,
-  },
-])
+  { deep: true },
+)
 
 const classifyMode = ref<ClassifyMode>('errorRate')
 

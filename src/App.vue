@@ -5,17 +5,33 @@ import { getUserInfoFromStorage, normalizeUserRole } from './utils/auth'
 
 const route = useRoute()
 const router = useRouter()
+const LAST_ROUTE_MAP_KEY = 'geoedu_last_sidebar_routes_v1'
 const sidebarCollapsed = ref(false)
 const userMenuOpen = ref(false)
 const userMenuRef = ref<HTMLElement | null>(null)
 const userInfo = ref<{ username?: string; role?: string } | null>(null)
 
 const historyNavActive = computed(() => route.path.startsWith('/history'))
+const wrongNavActive = computed(() => route.path.startsWith('/wrong'))
+const questionBankNavActive = computed(() => route.path.startsWith('/question-bank'))
 const isLoginPage = computed(() => route.path === '/login')
 const userInitial = computed(() => (userInfo.value?.username?.[0] || 'U').toUpperCase())
 const normalizedRole = computed(() => normalizeUserRole(userInfo.value?.role))
 const userRoleLabel = computed(() => (normalizedRole.value === 'teacher' ? '教师' : '学生'))
 const canAccessWrongBook = computed(() => normalizedRole.value === 'student')
+
+type NavGroup = 'history' | 'wrong' | 'questionBank'
+type LastRouteMap = Record<NavGroup, string>
+
+const lastRouteMap = ref<LastRouteMap>({
+  history: '/history',
+  wrong: '/wrong',
+  questionBank: '/question-bank',
+})
+
+const historyNavTo = computed(() => lastRouteMap.value.history || '/history')
+const wrongNavTo = computed(() => lastRouteMap.value.wrong || '/wrong')
+const questionBankNavTo = computed(() => lastRouteMap.value.questionBank || '/question-bank')
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
@@ -31,6 +47,25 @@ function toggleUserMenu() {
 
 function closeUserMenu() {
   userMenuOpen.value = false
+}
+
+function loadLastRouteMap() {
+  try {
+    const raw = sessionStorage.getItem(LAST_ROUTE_MAP_KEY)
+    if (!raw) return
+    const saved = JSON.parse(raw) as Partial<LastRouteMap>
+    lastRouteMap.value = {
+      history: saved.history || '/history',
+      wrong: saved.wrong || '/wrong',
+      questionBank: saved.questionBank || '/question-bank',
+    }
+  } catch {
+    // ignore invalid cache
+  }
+}
+
+function saveLastRouteMap() {
+  sessionStorage.setItem(LAST_ROUTE_MAP_KEY, JSON.stringify(lastRouteMap.value))
 }
 
 function handleClickOutside(e: MouseEvent) {
@@ -49,6 +84,7 @@ async function logout() {
 
 onMounted(() => {
   loadUserInfo()
+  loadLastRouteMap()
   document.addEventListener('click', handleClickOutside)
 })
 
@@ -58,7 +94,17 @@ onUnmounted(() => {
 
 watch(
   () => route.fullPath,
-  () => loadUserInfo(),
+  () => {
+    loadUserInfo()
+    if (route.path.startsWith('/history')) {
+      lastRouteMap.value.history = route.fullPath
+    } else if (route.path.startsWith('/wrong')) {
+      lastRouteMap.value.wrong = route.fullPath
+    } else if (route.path.startsWith('/question-bank')) {
+      lastRouteMap.value.questionBank = route.fullPath
+    }
+    saveLastRouteMap()
+  },
   { immediate: true },
 )
 </script>
@@ -101,7 +147,7 @@ watch(
       <div class="geo-sidebar__scrollable">
         <nav class="geo-sidebar__nav" aria-label="功能导航">
           <RouterLink
-            to="/history"
+            :to="historyNavTo"
             class="geo-sidebar__link"
             :class="{ 'geo-sidebar__link--active': historyNavActive }"
           >
@@ -110,9 +156,9 @@ watch(
           </RouterLink>
           <RouterLink
             v-if="canAccessWrongBook"
-            to="/wrong"
+            :to="wrongNavTo"
             class="geo-sidebar__link"
-            active-class="geo-sidebar__link--active"
+            :class="{ 'geo-sidebar__link--active': wrongNavActive }"
           >
             <span class="geo-sidebar__icon" aria-hidden="true">✎</span>
             <span class="geo-sidebar__label">错题本</span>
@@ -125,7 +171,11 @@ watch(
             <span class="geo-sidebar__icon" aria-hidden="true">⌕</span>
             <span class="geo-sidebar__label">知识点</span>
           </RouterLink>
-          <RouterLink to="/question-bank" class="geo-sidebar__link" active-class="geo-sidebar__link--active">
+          <RouterLink
+            :to="questionBankNavTo"
+            class="geo-sidebar__link"
+            :class="{ 'geo-sidebar__link--active': questionBankNavActive }"
+          >
             <span class="geo-sidebar__icon" aria-hidden="true">◇</span>
             <span class="geo-sidebar__label">题库</span>
           </RouterLink>
